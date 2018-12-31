@@ -44,6 +44,11 @@ class _RPN(nn.Module):
         self.rpn_loss_cls = 0
         self.rpn_loss_box = 0
 
+        # TODO Added
+        self.rpn_loss_agg = 0
+        self.rpn_loss_reg = 0
+        self.rpn_loss_com = 0
+
     @staticmethod
     def reshape(x, d):
         input_shape = x.size()
@@ -96,7 +101,6 @@ class _RPN(nn.Module):
             rpn_label = Variable(rpn_label.long())
             self.rpn_loss_cls = F.cross_entropy(rpn_cls_score, rpn_label)
             fg_cnt = torch.sum(rpn_label.data.ne(0))
-
             rpn_bbox_targets, rpn_bbox_inside_weights, rpn_bbox_outside_weights = rpn_data[1:]
 
             # compute bbox regression loss
@@ -107,4 +111,29 @@ class _RPN(nn.Module):
             self.rpn_loss_box = _smooth_l1_loss(rpn_bbox_pred, rpn_bbox_targets, rpn_bbox_inside_weights,
                                                             rpn_bbox_outside_weights, sigma=3, dim=[1,2,3])
 
-        return rois, self.rpn_loss_cls, self.rpn_loss_box
+            # TODO Added
+            self.rpn_loss_reg = rpn_cls_score * self.rpn_loss_box
+            self.rpn_loss_com = 0
+            groups = {}
+
+            def get_id(x):
+                # TODO how to get unique id for certain ground truth
+                return x
+            for i, rpn_bbox_target in enumerate(rpn_bbox_targets):
+                _id = get_id(rpn_bbox_target)
+                if _id in groups:
+                    groups[_id].append(i)
+                else:
+                    groups[_id] = [i]
+            for group in groups:
+                # TODO how to init
+                rpn_bbox_pred_mean = Variable()
+                for i in group:
+                    rpn_bbox_pred_mean += rpn_bbox_pred[i]
+                rpn_bbox_pred_mean = rpn_bbox_pred_mean.mean()
+                # TODO modify param
+                self.rpn_loss_com +=\
+                    _smooth_l1_loss(rpn_bbox_targets[group[0]], rpn_bbox_pred_mean,
+                                    rpn_bbox_inside_weights, rpn_bbox_outside_weights, sigma=3, dim=[1, 2, 3])
+            self.rpn_loss_agg = self.rpn_loss_reg + self.rpn_loss_com
+        return rois, self.rpn_loss_cls, self.rpn_loss_box, self.rpn_loss_agg
