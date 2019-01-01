@@ -111,29 +111,34 @@ class _RPN(nn.Module):
             self.rpn_loss_box = _smooth_l1_loss(rpn_bbox_pred, rpn_bbox_targets, rpn_bbox_inside_weights,
                                                             rpn_bbox_outside_weights, sigma=3, dim=[1,2,3])
 
-            # TODO Added
+            # TODO 增加的loss计算
             self.rpn_loss_reg = rpn_cls_score * self.rpn_loss_box
-            self.rpn_loss_com = 0
+            self.rpn_loss_com = Variable(0)
             groups = {}
 
             def get_id(x):
-                # TODO how to get unique id for certain ground truth
-                return x
+                # TODO 这里用来获取ground truth中同一坐标的唯一标识，可采用坐标元组
+                return tuple(x)
+            # TODO 将ground truth分组，每组表示同一个ground truth对应的多个anchor
             for i, rpn_bbox_target in enumerate(rpn_bbox_targets):
                 _id = get_id(rpn_bbox_target)
                 if _id in groups:
                     groups[_id].append(i)
                 else:
                     groups[_id] = [i]
+            count = 0
             for group in groups:
-                # TODO how to init
-                rpn_bbox_pred_mean = Variable()
+                if len(group) <= 1:
+                    continue
+                # TODO 对一个ground truth对应多个anchor的计算compactness loss
+                count += 1
+                rpn_bbox_pred_mean = Variable(0)
                 for i in group:
                     rpn_bbox_pred_mean += rpn_bbox_pred[i]
-                rpn_bbox_pred_mean = rpn_bbox_pred_mean.mean()
-                # TODO modify param
+                rpn_bbox_pred_mean = rpn_bbox_pred_mean / len(group)
+                # TODO 计算smooth l1 loss，参数可能不正确，必要时可以重新实现smooth l1 loss函数
                 self.rpn_loss_com +=\
                     _smooth_l1_loss(rpn_bbox_targets[group[0]], rpn_bbox_pred_mean,
-                                    rpn_bbox_inside_weights, rpn_bbox_outside_weights, sigma=3, dim=[1, 2, 3])
-            self.rpn_loss_agg = self.rpn_loss_reg + self.rpn_loss_com
+                                    rpn_bbox_inside_weights[group[0]], rpn_bbox_outside_weights[group[0]], sigma=3, dim=[1, 2, 3])
+            self.rpn_loss_agg = self.rpn_loss_reg.mean() + self.rpn_loss_com / count
         return rois, self.rpn_loss_cls, self.rpn_loss_box, self.rpn_loss_agg
